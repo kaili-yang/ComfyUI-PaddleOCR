@@ -46,4 +46,4 @@ This project wraps the amazing [PaddleOCR](https://github.com/PaddlePaddle/Paddl
 
 ## License
 
-MIT
+Apache 2.0
