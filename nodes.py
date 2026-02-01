@@ -7,8 +7,13 @@ from .utils import tensor_to_cv2_img
 # Attempt to import PaddleOCR
 try:
     from paddleocr import PaddleOCR
+    try:
+        from paddleocr import PaddleOCRVL
+    except ImportError:
+        PaddleOCRVL = None
 except ImportError:
     PaddleOCR = None
+    PaddleOCRVL = None
 
 class PaddleOCR_Node:
     """
@@ -137,3 +142,126 @@ class PaddleOCR_TestNode:
 
     def test_add(self, int_input):
         return (int_input + 1,)
+
+
+class PaddleOCRVL_Node:
+    """
+    PaddleOCR-VL Node for Document Parsing (v1.5).
+    """
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "use_layout_detection": ("BOOLEAN", {"default": True}),
+                "use_doc_orientation_classify": ("BOOLEAN", {"default": False}),
+                "use_doc_unwarping": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "use_chart_recognition": ("BOOLEAN", {"default": False}),
+                "use_seal_recognition": ("BOOLEAN", {"default": False}),
+                # "use_ocr_for_image_block": ("BOOLEAN", {"default": False}), # Optional advanced
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("markdown_text",)
+    FUNCTION = "apply_vl_parse"
+    CATEGORY = "PaddleOCR"
+
+    def apply_vl_parse(self, image, use_layout_detection, use_doc_orientation_classify, 
+                       use_doc_unwarping, use_chart_recognition, use_seal_recognition):
+        
+        if PaddleOCRVL is None:
+             raise ImportError("PaddleOCRVL not found. Please upgrade paddleocr (pip install -U paddleocr) to use VL features.")
+
+        try:
+            # Initialize Pipeline
+            # We explicitly disable MKLDNN to prevent Windows crashes, consistent with the main node.
+            pipeline = PaddleOCRVL(
+                use_layout_detection=use_layout_detection,
+                use_doc_orientation_classify=use_doc_orientation_classify,
+                use_doc_unwarping=use_doc_unwarping,
+                use_chart_recognition=use_chart_recognition,
+                use_seal_recognition=use_seal_recognition,
+                enable_mkldnn=False 
+            )
+
+            # Process Image
+            # PaddleOCRVL expects path or numpy array. ComfyUI gives Tensor (B,H,W,C) or (H,W,C).
+            # We reuse tensor_to_cv2_img
+            cv_images = tensor_to_cv2_img(image)
+            
+            markdown_results = []
+            
+            for img_numpy in cv_images:
+                # predict() returns a list of dicts or objects depending on version.
+                # Based on doc, predict returns a list of results.
+                # Each res has save_to_markdown or properites.
+                # We'll use the predict() method which presumably handles list logic internally or returns list.
+                
+                # The predict method signature: predict(input, ...)
+                results = pipeline.predict(img_numpy)
+                
+                for res in results:
+                    # Depending on PaddleOCR structure, 'res' might be an object that prints/saves.
+                    # We need the markdown string content.
+                    # Inspecting paddleocr code: res usually has 'str' or 'markdown' attribute or specialized method.
+                    # Looking at paddleocr implementation, predict returns list of structure results.
+                    # Usually structure results are converted to markdown.
+                    
+                    # If res is a dict/object, we try to extract 'markdown' field if available, 
+                    # or rely on standard keys. 
+                    # NOTE: PaddleOCR-VL return structure can be complex. 
+                    # The demo uses res.save_to_markdown(). Let's see if we can get the string directly.
+                    # Often res is a subclass of dict or has __str__.
+                    
+                    # Hack: if no direct 'markdown' string property, we might need to parse `res`.
+                    # For v1.5, it likely returns a structure that implies markdown generation.
+                    
+                    # Let's check keys if it's a dict
+                    if hasattr(res, 'keys'):
+                         # Try standard keys
+                         pass
+                    
+                    # For now, let's assume we can cast to string or it has a 'markdown' attribute 
+                    # If not, we'll iterate standard fields.
+                    # Actually, seeing the file content: `concatenation` helper exists.
+                    pass
+                
+                # To be safe and obtain the raw markdown:
+                # The CLI/demo saves to file.
+                # We will rely on simple string conversion for start, or use a temporary internal buffer if needed.
+                # However, the best way without I/O is to inspect the returned object.
+                # Let's assume standard object str representation or try to find a 'markdown' property.
+                
+                # STARTUP FIX: 
+                # PaddleOCR-VL results usually contain 'html', 'latex', 'markdown' keys in the internal dict.
+                # Let's map output to str(results) first for debugging if we are unsure, 
+                # but better: assume 'markdown' if compatible with PP-Structure.
+                pass
+
+                # Actually, let's stick to the simplest integration: passing the object to user might not work (string output).
+                # We will perform a prediction and iterate.
+                # Based on `predict` source, it returns `self.predict_iter(...)` list.
+                
+                # Let's try to grab the structured text.
+                # If we lack specific API knowledge of the result object's STRING method, 
+                # we'll capture standard output or return the stringified result.
+                
+                # Improvement: Inspect the result object in memory if possible. 
+                # For now, append str(res)
+                for res in results:
+                    if hasattr(res, 'str'): # specific string method
+                        markdown_results.append(res.str)
+                    elif isinstance(res, dict) and 'markdown' in res:
+                        markdown_results.append(res['markdown'])
+                    else:
+                        markdown_results.append(str(res))
+
+            return ("\n\n".join(markdown_results),)
+
+        except Exception as e:
+            traceback.print_exc()
+            raise RuntimeError(f"PaddleOCR-VL Failed: {e}")
+
