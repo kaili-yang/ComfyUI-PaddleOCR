@@ -30,6 +30,21 @@ This node leverages the PaddlePaddle deep learning framework to provide industry
 
 4. Restart ComfyUI.
 
+## Docker Support (Recommended for Windows Users)
+
+To avoid compatibility issues (especially on Windows), you can run this node in a Docker container with pre-configured CUDA environment.
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+2. Navigate to this node's directory:
+   ```bash
+   cd ComfyUI/custom_nodes/ComfyUI-PaddleOCR-VL
+   ```
+3. Run with Docker Compose:
+   ```bash
+   docker-compose up -d
+   ```
+   This will start a dedicated ComfyUI instance at `http://localhost:8188` with the PaddleOCR node installed.
+
 ## Usage
 
 1. **Add Node**: Right-click in the ComfyUI canvas and search for `PaddleOCR Text Detection`. You can typically find it under the `PaddleOCR` category.
