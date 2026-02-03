@@ -3,7 +3,7 @@ import { app } from "../../scripts/app.js";
 app.registerExtension({
     name: "PaddleOCR.PaidNodeStyle",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        if (nodeData.name === "PaddleOCR_Node") {
+        if (nodeData.name === "PaddleOCR_Node" || nodeData.name === "PaddleOCR_Unified_Node") {
             // Override onNodeCreated to set default customized colors
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {

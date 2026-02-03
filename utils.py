@@ -36,66 +36,62 @@ def get_paddle_hw_kwargs():
     Intelligently determines the hardware arguments for PaddleOCR initialization.
     Ports logic from PaddleOCR's tools/infer/utility.py to ensure best compatibility
     across Windows, Mac (MPS/CPU), and Linux (CUDA/ROCm).
+    
+    Returns:
+        dict: Kwargs compatible with PaddleXPipelineWrapper (device, enable_mkldnn, etc.)
     """
     kwargs = {}
     
-    # 1. Detect Hardware
-    # Check for CUDA/ROCm
+    # 1. Detect Hardware -> 'device' argument
+    # PaddleXPipelineWrapper expects 'device': str (e.g. "gpu", "cpu", "npu", "xpu", "gpu:0")
+    
+    device = "cpu" # default
+    
     if paddle.is_compiled_with_cuda() or paddle.device.is_compiled_with_rocm():
-        kwargs['use_gpu'] = True
+        device = "gpu"
         print("DEBUG: PaddleOCR using GPU (CUDA/ROCm)")
-    else:
-        kwargs['use_gpu'] = False
-        print("DEBUG: PaddleOCR using CPU (No CUDA detected)")
-
-    # Check for Mac MPS (Metal Performance Shaders)
-    # Paddle 2.5+ supports MPS conceptually, but often via 'gpu' flag on Mac or specific backends.
-    # However, standard PaddleOCR 'use_gpu' often implies NVIDIA. 
-    # Current PaddleOCR logic generally uses `use_gpu=True` if available.
-    if sys.platform == 'darwin':
-        # On Mac, check if we can simply use CPU to be safe, or enable mkldnn
-        # MKLDNN on Mac (Arm64) is often supported and faster than vanilla CPU.
-        # But 'enable_mkldnn' often defaults to None/False in basic usage.
+    elif sys.platform == 'darwin':
+        # Mac MPS check
+        # Paddle 2.5+ usually handles 'gpu' on Mac as MPS/Metal if available.
+        # However, explicit 'mps' string isn't standard in common_args.py checks (it checks "gpu", "cpu", "npu", "xpu", "mlu").
+        # If installed with metal support, 'gpu' often works. 
+        # But to be safe on M-series, we often just say 'cpu' or let Paddle auto-detect if we pass nothing?
+        # common_args sets default to "gpu" if not specified and CUDA available.
         
-        # If user installed paddlepaddle-gpu (which doesn't really exist for mac m-series the same way),
-        # usually it's just 'paddlepaddle' which uses cpu/accelerate.
-        pass
+        # Let's try "gpu" if available, else "cpu".
+        # Actually checking `paddle.device.get_device()` is safer.
+        current_device = paddle.device.get_device()
+        if 'gpu' in current_device or 'mps' in current_device:
+             device = "gpu" # Paddle unified device name often maps mps to gpu in high level APIs
+        else:
+             device = "cpu"
+    else:
+        # Check for XPU/NPU
+        if hasattr(paddle, 'is_compiled_with_custom_device'):
+            try:
+                if paddle.is_compiled_with_custom_device('npu'):
+                    device = "npu"
+                elif paddle.is_compiled_with_custom_device('xpu'):
+                    device = "xpu"
+                elif paddle.is_compiled_with_custom_device('mlu'):
+                    device = "mlu"
+            except:
+                pass
+
+    kwargs['device'] = device
 
     # 2. Handle OneDNN (MKLDNN)
     # Windows typically has issues with OneDNN + some AVX instrs or specific Paddle versions.
-    # The safest bet for Windows is enable_mkldnn=False unless we test compatibility.
-    # Linux usually benefits from it if CPU only.
-    
     if sys.platform == 'win32':
         # KNOWN ISSUE: PaddleOCR on Windows with MKLDNN can crash (NotImplementedError).
-        # We explicitly disable it to be safe.
         kwargs['enable_mkldnn'] = False
         print("DEBUG: Forced enable_mkldnn=False for Windows compatibility")
     else:
-        # On Linux/Mac, we can try to leave it default (None) or True.
-        # PaddleOCR default is often False/str2bool(None) -> False in CLI, 
-        # but internal default might vary.
-        # To match 'PaddleOCR_Node' previous fix where we didn't specify it (defaulting to logic),
-        # or where we explicitly set it False for safety.
-        # Given we want "Optimized", we can try `True` for CPU cases on Linux, 
-        # BUT reliability is priority. Let's keep it default (don't set key) unless we are sure.
-        # Actually, let's allow it to be default (Paddle handles it).
-        pass
+        # On Linux/Mac, we can try to leave it default.
+        # But if we are on CPU, enabling it is good.
+        if device == "cpu":
+             # We let Paddle default decide, or explicitly enable if we want speed.
+             # _common_args defaults enable_mkldnn to True usually (DEFAULT_ENABLE_MKLDNN checking needed, typically True).
+             pass
 
-    # 3. Check for XPU / NPU (Custom Hardware)
-    # If compiled with custom devices, we might want to flag them.
-    if hasattr(paddle, 'is_compiled_with_custom_device'):
-        try:
-            if paddle.is_compiled_with_custom_device('npu'):
-                kwargs['use_npu'] = True
-                print("DEBUG: PaddleOCR using NPU")
-            if paddle.is_compiled_with_custom_device('xpu'):
-                kwargs['use_xpu'] = True
-                print("DEBUG: PaddleOCR using XPU")
-            if paddle.is_compiled_with_custom_device('mlu'):
-                kwargs['use_mlu'] = True
-                print("DEBUG: PaddleOCR using MLU")
-        except Exception:
-            pass
-            
     return kwargs
